@@ -45,6 +45,15 @@ DEFAULT_MONODEPTH_CONFIG_DICT = DepthProConfig(
     fov_encoder_preset="dinov2l16_384",
 )
 
+SMALL_MONODEPTH_CONFIG_DICT = DepthProConfig(
+    patch_encoder_preset="dinov2s16_384",
+    image_encoder_preset="dinov2s16_384",
+    checkpoint_uri=None,
+    decoder_features=96,
+    use_fov_head=True,
+    fov_encoder_preset="dinov2s16_384",
+)
+
 
 def create_backbone_model(
     preset: ViTPreset

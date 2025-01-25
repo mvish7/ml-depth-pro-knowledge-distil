@@ -25,6 +25,7 @@ LOGGER = logging.getLogger(__name__)
 
 ViTPreset = Literal[
     "dinov2l16_384",
+    "dinov2s16_384",
 ]
 
 
@@ -59,6 +60,19 @@ VIT_CONFIG_DICT: Dict[ViTPreset, ViTConfig] = {
         img_size=384,
         patch_size=16,
         timm_preset="vit_large_patch14_dinov2",
+        timm_img_size=518,
+        timm_patch_size=14,
+    ),
+    "dinov2s16_384": ViTConfig(
+        in_chans=3,
+        embed_dim=384,
+        # should be lower than nw depth
+        encoder_feature_layer_ids=[3, 5, 8, 11],
+        # final dim should match embed_dim of underlying vit
+        encoder_feature_dims=[96, 192, 384, 384],
+        img_size=384,
+        patch_size=16,
+        timm_preset="vit_small_patch14_dinov2",
         timm_img_size=518,
         timm_patch_size=14,
     ),
