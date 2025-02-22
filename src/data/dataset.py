@@ -5,8 +5,9 @@ Base class for datasets following PyTorch dataset conventions.
 from abc import ABC, abstractmethod
 from typing import Any, Tuple
 
+import numpy as np
 from torchvision.transforms import (
-    Compose,
+    Compose, Resize,
     ConvertImageDtype,
     Lambda,
     Normalize,
@@ -22,19 +23,8 @@ class BaseDataset(ABC):
     """
     def __init__(self, precision: str = "torch.bfloat16", device: str = "cpu"):
         self.precision = precision
-        self.image_transform = Compose([
-            Pad([4, 3, 5, 3], fill=0),
-            ToTensor(),
-            Lambda(lambda x: x.to(device)),
-            Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
-            ConvertImageDtype(precision),
-        ])
-        self.depth_transform = Compose([
-            Pad([4, 3, 5, 3], fill=0),
-            ToTensor(),
-            Lambda(lambda x: x.to(device)),
-            ConvertImageDtype(precision),
-        ])
+        self.image_transform = None
+        self.depth_transform = None
 
     @abstractmethod
     def __len__(self) -> int:
@@ -59,6 +49,22 @@ class BaseDataset(ABC):
                  (input, target) or any other format needed by your model
         """
         pass
+
+    def load_image(self, path: str) -> np.ndarray:
+        """
+        reads the rgb image from the disk
+        Returns:
+            np.ndarray containing the image
+        """
+        raise NotImplementedError("image loading not implemented")
+
+    def load_depth(self, path: str) -> np.ndarray:
+        """
+        reads the depth image from the disk and preprocesses it if necessary
+        Returns:
+            np.ndarray containing planar depth values
+        """
+        raise NotImplementedError("depth loading not implemented")
 
     def get_sample_shape(self) -> Tuple[int, ...]:
         """
