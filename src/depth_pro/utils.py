@@ -3,7 +3,7 @@
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Union
-
+import h5py
 import numpy as np
 import pillow_heif
 from PIL import ExifTags, Image, TiffTags

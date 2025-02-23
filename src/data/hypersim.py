@@ -3,6 +3,8 @@ KITTI dataset for monocular depth estimation.
 """
 
 import os
+import random
+
 from PIL import Image
 
 import json
@@ -89,7 +91,8 @@ class HypersimDataset(BaseDataset):
         self.maks_transform = Compose([
             ToTensor(),
             Pad([0, 128, 0, 128], fill=10),
-            Resize((1536, 1536))])
+            Resize((1536, 1536)),
+            Lambda(lambda x: x.to(device))])
 
         self.apply_augmentation = DepthAugmentation()
 
@@ -139,8 +142,9 @@ class HypersimDataset(BaseDataset):
         mask = np.zeros_like(depth)
         mask[depth>0] = 1
         # Apply transforms if specified
-        image = self.image_transform(image)
-        depth = self.depth_transform(depth)
+        # copy to force contiguous memory -- avoid numpy negative stride error caused by np.fliplr
+        image = self.image_transform(np.copy(image))
+        depth = self.depth_transform(np.copy(depth))
         mask = self.maks_transform(mask)
 
         return {'image': image, 'depth': depth, 'valid_mask': mask}
@@ -176,6 +180,9 @@ class HypersimDataset(BaseDataset):
 if __name__ == "__main__":
     hypersim_data = HypersimDataset(root_dir="/media/vishal/datasets/hypersim/",
                                     split="val", device="cuda", precision=torch.float32)
-    sample = hypersim_data[0]
-    visualize_hypersim_sample(sample)
-    a = 1
+
+    num_samples = 100
+    for _ in range(num_samples):
+        idx = random.choice(range(hypersim_data.__len__()))
+        sample = hypersim_data[idx]
+        # visualize_hypersim_sample(sample)
