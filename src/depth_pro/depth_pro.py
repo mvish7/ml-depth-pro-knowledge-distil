@@ -21,38 +21,39 @@ from .network.decoder import MultiresConvDecoder
 from .network.encoder import DepthProEncoder
 from .network.fov import FOVNetwork
 from .network.vit_factory import VIT_CONFIG_DICT, ViTPreset, create_vit
+from src.configs.model_configs import DepthProConfig, DEFAULT_MONODEPTH_CONFIG_DICT, SMALL_MONODEPTH_CONFIG_DICT
 
 
-@dataclass
-class DepthProConfig:
-    """Configuration for DepthPro."""
-
-    patch_encoder_preset: ViTPreset
-    image_encoder_preset: ViTPreset
-    decoder_features: int
-
-    checkpoint_uri: Optional[str] = None
-    fov_encoder_preset: Optional[ViTPreset] = None
-    use_fov_head: bool = True
-
-
-DEFAULT_MONODEPTH_CONFIG_DICT = DepthProConfig(
-    patch_encoder_preset="dinov2l16_384",
-    image_encoder_preset="dinov2l16_384",
-    checkpoint_uri="./checkpoints/depth_pro.pt",
-    decoder_features=256,
-    use_fov_head=True,
-    fov_encoder_preset="dinov2l16_384",
-)
-
-SMALL_MONODEPTH_CONFIG_DICT = DepthProConfig(
-    patch_encoder_preset="dinov2s16_384",
-    image_encoder_preset="dinov2s16_384",
-    checkpoint_uri=None,
-    decoder_features=96,
-    use_fov_head=True,
-    fov_encoder_preset="dinov2s16_384",
-)
+# @dataclass
+# class DepthProConfig:
+#     """Configuration for DepthPro."""
+#
+#     patch_encoder_preset: ViTPreset
+#     image_encoder_preset: ViTPreset
+#     decoder_features: int
+#
+#     checkpoint_uri: Optional[str] = None
+#     fov_encoder_preset: Optional[ViTPreset] = None
+#     use_fov_head: bool = True
+#
+#
+# DEFAULT_MONODEPTH_CONFIG_DICT = DepthProConfig(
+#     patch_encoder_preset="dinov2l16_384",
+#     image_encoder_preset="dinov2l16_384",
+#     checkpoint_uri="./checkpoints/depth_pro.pt",
+#     decoder_features=256,
+#     use_fov_head=True,
+#     fov_encoder_preset="dinov2l16_384",
+# )
+#
+# SMALL_MONODEPTH_CONFIG_DICT = DepthProConfig(
+#     patch_encoder_preset="dinov2s16_384",
+#     image_encoder_preset="dinov2s16_384",
+#     checkpoint_uri=None,
+#     decoder_features=96,
+#     use_fov_head=True,
+#     fov_encoder_preset="dinov2s16_384",
+# )
 
 
 def create_backbone_model(
