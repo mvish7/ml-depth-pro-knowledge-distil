@@ -14,35 +14,37 @@ from typing import Tuple, Dict
 import h5py
 from torch import dtype
 
-from torchvision.transforms import (
-    Compose, Resize,
-    ConvertImageDtype,
-    Lambda,
-    Normalize,
-    ToTensor,
-    Pad
-)
+from torchvision.transforms import (Compose, Resize, ConvertImageDtype, Lambda,
+                                    Normalize, ToTensor, Pad)
 
-from dataset import BaseDataset
-from augmentation_pipeline import DepthAugmentation
-from utils.visualize import visualize_hypersim_sample
+from src.data.dataset import BaseDataset
+from src.data.augmentation_pipeline import DepthAugmentation
+from src.utils.visualize import visualize_hypersim_sample
 
 
-def obtain_planar_depth_values(npy_dist: np.ndarray)->np.ndarray:
+def obtain_planar_depth_values(npy_dist: np.ndarray) -> np.ndarray:
     """
     converts hypersim's depth (i.e. distance from camera center) to planar depth (i.e. distance from image plane)
     credits: https://github.com/apple/ml-hypersim/issues/9#issuecomment-754935697
     """
     int_height, int_width = npy_dist.shape[:2]
     flt_focal = 886.81
-    npy_imageplane_x = np.linspace((-0.5 * int_width) + 0.5,
-                                   (0.5 * int_width) - 0.5, int_width).reshape(1,int_width).repeat(int_height, 0).astype(np.float32)[:, :, None]
+    npy_imageplane_x = np.linspace(
+        (-0.5 * int_width) + 0.5, (0.5 * int_width) - 0.5,
+        int_width).reshape(1, int_width).repeat(int_height,
+                                                0).astype(np.float32)[:, :,
+                                                                      None]
 
-    npy_imageplane_y = np.linspace((-0.5 * int_height) + 0.5,
-                                   (0.5 * int_height) - 0.5, int_height).reshape(int_height,1).repeat(int_width, 1).astype(np.float32)[:, :, None]
+    npy_imageplane_y = np.linspace(
+        (-0.5 * int_height) + 0.5, (0.5 * int_height) - 0.5,
+        int_height).reshape(int_height, 1).repeat(int_width,
+                                                  1).astype(np.float32)[:, :,
+                                                                        None]
 
-    npy_imageplane_z = np.full([int_height, int_width, 1], flt_focal, np.float32)
-    npy_imageplane = np.concatenate([npy_imageplane_x, npy_imageplane_y, npy_imageplane_z], 2)
+    npy_imageplane_z = np.full([int_height, int_width, 1], flt_focal,
+                               np.float32)
+    npy_imageplane = np.concatenate(
+        [npy_imageplane_x, npy_imageplane_y, npy_imageplane_z], 2)
 
     npy_depth = npy_dist / np.linalg.norm(npy_imageplane, 2, 2) * flt_focal
 
@@ -58,7 +60,11 @@ class HypersimDataset(BaseDataset):
         split (str): Dataset split ('train', 'val', or 'test')
     """
 
-    def __init__(self, root_dir: str, split: str = "train", device: str = "cpu", precision: dtype = torch.float16):
+    def __init__(self,
+                 root_dir: str,
+                 split: str = "train",
+                 device: str = "cpu",
+                 precision: dtype = torch.float16):
         super().__init__()
         self.root_dir = root_dir
         self.split = split
@@ -92,10 +98,10 @@ class HypersimDataset(BaseDataset):
             ToTensor(),
             Pad([0, 128, 0, 128], fill=10),
             Resize((1536, 1536)),
-            Lambda(lambda x: x.to(device))])
+            Lambda(lambda x: x.to(device))
+        ])
 
         self.apply_augmentation = DepthAugmentation()
-
 
     def __len__(self) -> int:
         return len(self.filenames)
@@ -140,7 +146,7 @@ class HypersimDataset(BaseDataset):
         image, depth = self.apply_augmentation(image, depth)
         # create a mask to apply during loss calculations
         mask = np.zeros_like(depth)
-        mask[depth>0] = 1
+        mask[depth > 0] = 1
         # Apply transforms if specified
         # copy to force contiguous memory -- avoid numpy negative stride error caused by np.fliplr
         image = self.image_transform(np.copy(image))
@@ -178,8 +184,11 @@ class HypersimDataset(BaseDataset):
 
 
 if __name__ == "__main__":
-    hypersim_data = HypersimDataset(root_dir="/media/vishal/datasets/hypersim/",
-                                    split="val", device="cuda", precision=torch.float32)
+    hypersim_data = HypersimDataset(
+        root_dir="/media/vishal/datasets/hypersim/",
+        split="val",
+        device="cuda",
+        precision=torch.float32)
 
     num_samples = 100
     for _ in range(num_samples):
