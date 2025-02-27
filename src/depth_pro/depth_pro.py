@@ -1,7 +1,6 @@
 # Copyright (C) 2024 Apple Inc. All Rights Reserved.
 # Depth Pro: Sharp Monocular Metric Depth in Less Than a Second
 
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -22,7 +21,6 @@ from .network.encoder import DepthProEncoder
 from .network.fov import FOVNetwork
 from .network.vit_factory import VIT_CONFIG_DICT, ViTPreset, create_vit
 from src.configs.model_configs import DepthProConfig, DEFAULT_MONODEPTH_CONFIG_DICT, SMALL_MONODEPTH_CONFIG_DICT
-
 
 # @dataclass
 # class DepthProConfig:
@@ -56,9 +54,7 @@ from src.configs.model_configs import DepthProConfig, DEFAULT_MONODEPTH_CONFIG_D
 # )
 
 
-def create_backbone_model(
-    preset: ViTPreset
-) -> Tuple[nn.Module, ViTPreset]:
+def create_backbone_model(preset: ViTPreset) -> Tuple[nn.Module, ViTPreset]:
     """Create and load a backbone model given a config.
 
     Args:
@@ -98,15 +94,14 @@ def create_model_and_transforms(
 
     """
     patch_encoder, patch_encoder_config = create_backbone_model(
-        preset=config.patch_encoder_preset
-    )
+        preset=config.patch_encoder_preset)
     image_encoder, _ = create_backbone_model(
-        preset=config.image_encoder_preset
-    )
+        preset=config.image_encoder_preset)
 
     fov_encoder = None
     if config.use_fov_head and config.fov_encoder_preset is not None:
-        fov_encoder, _ = create_backbone_model(preset=config.fov_encoder_preset)
+        fov_encoder, _ = create_backbone_model(
+            preset=config.fov_encoder_preset)
 
     dims_encoder = patch_encoder_config.encoder_feature_dims
     hook_block_ids = patch_encoder_config.encoder_feature_layer_ids
@@ -129,23 +124,20 @@ def create_model_and_transforms(
         fov_encoder=fov_encoder,
     ).to(device)
 
-    if precision == torch.half:
-        model.half()
+    if precision is not None:
+        model = model.to(precision)
 
-    transform = Compose(
-        [
-            ToTensor(),
-            Lambda(lambda x: x.to(device)),
-            Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
-            ConvertImageDtype(precision),
-        ]
-    )
+    transform = Compose([
+        ToTensor(),
+        Lambda(lambda x: x.to(device)),
+        Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
+        ConvertImageDtype(precision),
+    ])
 
     if config.checkpoint_uri is not None:
         state_dict = torch.load(config.checkpoint_uri, map_location="cpu")
         missing_keys, unexpected_keys = model.load_state_dict(
-            state_dict=state_dict, strict=True
-        )
+            state_dict=state_dict, strict=True)
 
         if len(unexpected_keys) != 0:
             raise KeyError(
@@ -156,7 +148,8 @@ def create_model_and_transforms(
         # which we would not use. We only use the encoding.
         missing_keys = [key for key in missing_keys if "fc_norm" not in key]
         if len(missing_keys) != 0:
-            raise KeyError(f"Keys are missing when loading monodepth: {missing_keys}")
+            raise KeyError(
+                f"Keys are missing when loading monodepth: {missing_keys}")
 
     return model, transform
 
@@ -187,12 +180,14 @@ class DepthPro(nn.Module):
 
         self.encoder = encoder
         self.decoder = decoder
-    
+
         dim_decoder = decoder.dim_decoder
         self.head = nn.Sequential(
-            nn.Conv2d(
-                dim_decoder, dim_decoder // 2, kernel_size=3, stride=1, padding=1
-            ),
+            nn.Conv2d(dim_decoder,
+                      dim_decoder // 2,
+                      kernel_size=3,
+                      stride=1,
+                      padding=1),
             nn.ConvTranspose2d(
                 in_channels=dim_decoder // 2,
                 out_channels=dim_decoder // 2,
@@ -209,7 +204,11 @@ class DepthPro(nn.Module):
                 padding=1,
             ),
             nn.ReLU(True),
-            nn.Conv2d(last_dims[0], last_dims[1], kernel_size=1, stride=1, padding=0),
+            nn.Conv2d(last_dims[0],
+                      last_dims[1],
+                      kernel_size=1,
+                      stride=1,
+                      padding=0),
             nn.ReLU(),
         )
 
@@ -218,14 +217,17 @@ class DepthPro(nn.Module):
 
         # Set the FOV estimation head.
         if use_fov_head:
-            self.fov = FOVNetwork(num_features=dim_decoder, fov_encoder=fov_encoder)
+            self.fov = FOVNetwork(num_features=dim_decoder,
+                                  fov_encoder=fov_encoder)
 
     @property
     def img_size(self) -> int:
         """Return the internal image size of the network."""
         return self.encoder.img_size
 
-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+    def forward(
+            self,
+            x: torch.Tensor) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """Decode by projection and fusion of multi-resolution encodings.
 
         Args:
@@ -246,7 +248,7 @@ class DepthPro(nn.Module):
 
         fov_deg = None
         if hasattr(self, "fov"):
-            fov_deg = self.fov.forward(x, features_0.detach())
+            fov_deg, op_feat = self.fov.forward(x, features_0.detach())
 
         return canonical_inverse_depth, fov_deg
 
@@ -290,15 +292,17 @@ class DepthPro(nn.Module):
 
         canonical_inverse_depth, fov_deg = self.forward(x)
         if f_px is None:
-            f_px = 0.5 * W / torch.tan(0.5 * torch.deg2rad(fov_deg.to(torch.float)))
-        
+            f_px = 0.5 * W / torch.tan(
+                0.5 * torch.deg2rad(fov_deg.to(torch.float)))
+
         inverse_depth = canonical_inverse_depth * (W / f_px)
         f_px = f_px.squeeze()
 
         if resize:
-            inverse_depth = nn.functional.interpolate(
-                inverse_depth, size=(H, W), mode=interpolation_mode, align_corners=False
-            )
+            inverse_depth = nn.functional.interpolate(inverse_depth,
+                                                      size=(H, W),
+                                                      mode=interpolation_mode,
+                                                      align_corners=False)
 
         depth = 1.0 / torch.clamp(inverse_depth, min=1e-4, max=1e4)
 
