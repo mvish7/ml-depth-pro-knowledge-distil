@@ -20,6 +20,7 @@ class MultiresConvDecoder(nn.Module):
         self,
         dims_encoder: Iterable[int],
         dim_decoder: int,
+        student: bool = False,
     ):
         """Initialize multiresolution convolutional decoder.
 
@@ -27,23 +28,23 @@ class MultiresConvDecoder(nn.Module):
         ----
             dims_encoder: Expected dims at each level from the encoder.
             dim_decoder: Dim of decoder features.
+            student: Whether this is a student model.
 
         """
         super().__init__()
         self.dims_encoder = list(dims_encoder)
         self.dim_decoder = dim_decoder
         self.dim_out = dim_decoder
+        self.student = student
 
         num_encoders = len(self.dims_encoder)
 
         # At the highest resolution, i.e. level 0, we apply projection w/ 1x1 convolution
         # when the dimensions mismatch. Otherwise we do not do anything, which is
         # the default behavior of monodepth.
-        conv0 = (
-            nn.Conv2d(self.dims_encoder[0], dim_decoder, kernel_size=1, bias=False)
-            if self.dims_encoder[0] != dim_decoder
-            else nn.Identity()
-        )
+        conv0 = (nn.Conv2d(
+            self.dims_encoder[0], dim_decoder, kernel_size=1, bias=False)
+                 if self.dims_encoder[0] != dim_decoder else nn.Identity())
 
         convs = [conv0]
         for i in range(1, num_encoders):
@@ -55,8 +56,7 @@ class MultiresConvDecoder(nn.Module):
                     stride=1,
                     padding=1,
                     bias=False,
-                )
-            )
+                ))
 
         self.convs = nn.ModuleList(convs)
 
@@ -67,12 +67,33 @@ class MultiresConvDecoder(nn.Module):
                     num_features=dim_decoder,
                     deconv=(i != 0),
                     batch_norm=False,
-                )
-            )
+                ))
         self.fusions = nn.ModuleList(fusions)
 
+        # 1x1 convolutional layers for projecting student features to match teacher's features
+        if student:
+            # For features: 96 -> 256 -> 96
+            self.features_proj = nn.Conv2d(in_channels=96,
+                                           out_channels=256,
+                                           kernel_size=1)
+            self.features_reproj = nn.Conv2d(in_channels=256,
+                                             out_channels=96,
+                                             kernel_size=1)
+
+            # For lowres_features: 96 -> 256 -> 96
+            self.lowres_proj = nn.Conv2d(in_channels=96,
+                                         out_channels=256,
+                                         kernel_size=1)
+            self.lowres_reproj = nn.Conv2d(in_channels=256,
+                                           out_channels=96,
+                                           kernel_size=1)
+
     def forward(self, encodings: torch.Tensor) -> torch.Tensor:
-        """Decode the multi-resolution encodings."""
+        """Decode the multi-resolution encodings.
+        
+        Returns both original features and projected features for knowledge distillation
+        when in student training mode.
+        """
         num_levels = len(encodings)
         num_encoders = len(self.dims_encoder)
 
@@ -90,7 +111,23 @@ class MultiresConvDecoder(nn.Module):
         for i in range(num_levels - 2, -1, -1):
             features_i = self.convs[i](encodings[i])
             features = self.fusions[i](features, features_i)
-        return features, lowres_features
+
+        # Project features to teacher dimensions during student training
+        if self.student and self.training:
+            # Project to teacher dimensions
+            features_projected = self.features_proj(features)
+            lowres_projected = self.lowres_proj(lowres_features)
+
+            # Reproject back to student dimensions
+            features = self.features_reproj(features_projected)
+            lowres_features = self.lowres_reproj(lowres_projected)
+
+            # Return both original and projected features
+            return ([features,
+                     lowres_features], [features_projected, lowres_projected])
+
+        # For teacher or inference, return original features with empty projections
+        return ([features, lowres_features], [])
 
 
 class ResidualBlock(nn.Module):
@@ -102,7 +139,9 @@ class ResidualBlock(nn.Module):
     which can be further customized via factory functions.
     """
 
-    def __init__(self, residual: nn.Module, shortcut: nn.Module | None = None) -> None:
+    def __init__(self,
+                 residual: nn.Module,
+                 shortcut: nn.Module | None = None) -> None:
         """Initialize ResidualBlock."""
         super().__init__()
         self.residual = residual
@@ -163,7 +202,9 @@ class FeatureFusionBlock2d(nn.Module):
 
         self.skip_add = nn.quantized.FloatFunctional()
 
-    def forward(self, x0: torch.Tensor, x1: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(self,
+                x0: torch.Tensor,
+                x1: torch.Tensor | None = None) -> torch.Tensor:
         """Process and fuse input features."""
         x = x0
 

@@ -24,6 +24,7 @@ class DepthProEncoder(nn.Module):
         image_encoder: nn.Module,
         hook_block_ids: Iterable[int],
         decoder_features: int,
+        student: bool = False,
     ):
         """Initialize DepthProEncoder.
 
@@ -52,10 +53,11 @@ class DepthProEncoder(nn.Module):
 
         patch_encoder_embed_dim = patch_encoder.embed_dim
         image_encoder_embed_dim = image_encoder.embed_dim
+        # flag to denote student model
+        self.student = student
 
-        self.out_size = int(
-            patch_encoder.patch_embed.img_size[0] // patch_encoder.patch_embed.patch_size[0]
-        )
+        self.out_size = int(patch_encoder.patch_embed.img_size[0] //
+                            patch_encoder.patch_embed.patch_size[0])
 
         def _create_project_upsample_block(
             dim_in: int,
@@ -86,8 +88,7 @@ class DepthProEncoder(nn.Module):
                     stride=2,
                     padding=0,
                     bias=False,
-                )
-                for i in range(upsample_layers)
+                ) for i in range(upsample_layers)
             ]
 
             return nn.Sequential(*blocks)
@@ -99,18 +100,22 @@ class DepthProEncoder(nn.Module):
             upsample_layers=3,
         )
         self.upsample_latent1 = _create_project_upsample_block(
-            dim_in=patch_encoder_embed_dim, dim_out=self.dims_encoder[0], upsample_layers=2
-        )
+            dim_in=patch_encoder_embed_dim,
+            dim_out=self.dims_encoder[0],
+            upsample_layers=2)
 
         self.upsample0 = _create_project_upsample_block(
-            dim_in=patch_encoder_embed_dim, dim_out=self.dims_encoder[1], upsample_layers=1
-        )
+            dim_in=patch_encoder_embed_dim,
+            dim_out=self.dims_encoder[1],
+            upsample_layers=1)
         self.upsample1 = _create_project_upsample_block(
-            dim_in=patch_encoder_embed_dim, dim_out=self.dims_encoder[2], upsample_layers=1
-        )
+            dim_in=patch_encoder_embed_dim,
+            dim_out=self.dims_encoder[2],
+            upsample_layers=1)
         self.upsample2 = _create_project_upsample_block(
-            dim_in=patch_encoder_embed_dim, dim_out=self.dims_encoder[3], upsample_layers=1
-        )
+            dim_in=patch_encoder_embed_dim,
+            dim_out=self.dims_encoder[3],
+            upsample_layers=1)
 
         self.upsample_lowres = nn.ConvTranspose2d(
             in_channels=image_encoder_embed_dim,
@@ -130,12 +135,36 @@ class DepthProEncoder(nn.Module):
         )
 
         # Obtain intermediate outputs of the blocks.
-        self.patch_encoder.blocks[self.hook_block_ids[0]].register_forward_hook(
-            self._hook0
-        )
-        self.patch_encoder.blocks[self.hook_block_ids[1]].register_forward_hook(
-            self._hook1
-        )
+        self.patch_encoder.blocks[
+            self.hook_block_ids[0]].register_forward_hook(self._hook0)
+        self.patch_encoder.blocks[
+            self.hook_block_ids[1]].register_forward_hook(self._hook1)
+
+        # 1x1 convolutional layers for projecting student features to match teacher's features
+        if student:
+            # For x0: 192 -> 512 -> 192
+            self.x0_proj = nn.Conv2d(in_channels=192,
+                                     out_channels=512,
+                                     kernel_size=1)
+            self.x0_reproj = nn.Conv2d(in_channels=512,
+                                       out_channels=192,
+                                       kernel_size=1)
+
+            # For x1: 384 -> 1024 -> 384
+            self.x1_proj = nn.Conv2d(in_channels=384,
+                                     out_channels=1024,
+                                     kernel_size=1)
+            self.x1_reproj = nn.Conv2d(in_channels=1024,
+                                       out_channels=384,
+                                       kernel_size=1)
+
+            # For x_global: 384 -> 1024 -> 384
+            self.x_global_proj = nn.Conv2d(in_channels=384,
+                                           out_channels=1024,
+                                           kernel_size=1)
+            self.x_global_reproj = nn.Conv2d(in_channels=1024,
+                                             out_channels=384,
+                                             kernel_size=1)
 
     def _hook0(self, model, input, output):
         self.backbone_highres_hook0 = output
@@ -149,25 +178,31 @@ class DepthProEncoder(nn.Module):
         return self.patch_encoder.patch_embed.img_size[0] * 4
 
     def _create_pyramid(
-        self, x: torch.Tensor
+            self, x: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Create a 3-level image pyramid."""
         # Original resolution: 1536 by default.
         x0 = x
 
         # Middle resolution: 768 by default.
-        x1 = F.interpolate(
-            x, size=None, scale_factor=0.5, mode="bilinear", align_corners=False
-        )
+        x1 = F.interpolate(x,
+                           size=None,
+                           scale_factor=0.5,
+                           mode="bilinear",
+                           align_corners=False)
 
         # Low resolution: 384 by default, corresponding to the backbone resolution.
-        x2 = F.interpolate(
-            x, size=None, scale_factor=0.25, mode="bilinear", align_corners=False
-        )
+        x2 = F.interpolate(x,
+                           size=None,
+                           scale_factor=0.25,
+                           mode="bilinear",
+                           align_corners=False)
 
         return x0, x1, x2
 
-    def split(self, x: torch.Tensor, overlap_ratio: float = 0.25) -> torch.Tensor:
+    def split(self,
+              x: torch.Tensor,
+              overlap_ratio: float = 0.25) -> torch.Tensor:
         """Split the input into small patches with sliding window."""
         patch_size = 384
         patch_stride = int(patch_size * (1 - overlap_ratio))
@@ -187,7 +222,10 @@ class DepthProEncoder(nn.Module):
 
         return torch.cat(x_patch_list, dim=0)
 
-    def merge(self, x: torch.Tensor, batch_size: int, padding: int = 3) -> torch.Tensor:
+    def merge(self,
+              x: torch.Tensor,
+              batch_size: int,
+              padding: int = 3) -> torch.Tensor:
         """Merge the patched input into a image with sliding window."""
         steps = int(math.sqrt(x.shape[0] // batch_size))
 
@@ -197,7 +235,7 @@ class DepthProEncoder(nn.Module):
         for j in range(steps):
             output_row_list = []
             for i in range(steps):
-                output = x[batch_size * idx : batch_size * (idx + 1)]
+                output = x[batch_size * idx:batch_size * (idx + 1)]
 
                 if j != 0:
                     output = output[..., padding:, :]
@@ -216,9 +254,11 @@ class DepthProEncoder(nn.Module):
         output = torch.cat(output_list, dim=-2)
         return output
 
-    def reshape_feature(
-        self, embeddings: torch.Tensor, width, height, cls_token_offset=1
-    ):
+    def reshape_feature(self,
+                        embeddings: torch.Tensor,
+                        width,
+                        height,
+                        cls_token_offset=1):
         """Discard class token and reshape 1D feature map to a 2D grid."""
         b, hw, c = embeddings.shape
 
@@ -227,7 +267,8 @@ class DepthProEncoder(nn.Module):
             embeddings = embeddings[:, cls_token_offset:, :]
 
         # Shape: (batch, height, width, dim) -> (batch, dim, height, width)
-        embeddings = embeddings.reshape(b, height, width, c).permute(0, 3, 1, 2)
+        embeddings = embeddings.reshape(b, height, width,
+                                        c).permute(0, 3, 1, 2)
         return embeddings
 
     def forward(self, x: torch.Tensor) -> list[torch.Tensor]:
@@ -264,9 +305,9 @@ class DepthProEncoder(nn.Module):
 
         # Step 2: Run the backbone (BeiT) model and get the result of large batch size.
         x_pyramid_encodings = self.patch_encoder(x_pyramid_patches)
-        x_pyramid_encodings = self.reshape_feature(
-            x_pyramid_encodings, self.out_size, self.out_size
-        )
+        x_pyramid_encodings = self.reshape_feature(x_pyramid_encodings,
+                                                   self.out_size,
+                                                   self.out_size)
 
         # Step 3: merging.
         # Merge highres latent encoding.
@@ -275,40 +316,47 @@ class DepthProEncoder(nn.Module):
             self.out_size,
             self.out_size,
         )
-        x_latent0_features = self.merge(
-            x_latent0_encodings[: batch_size * 5 * 5], batch_size=batch_size, padding=3
-        )
+        x_latent0_features = self.merge(x_latent0_encodings[:batch_size * 5 *
+                                                            5],
+                                        batch_size=batch_size,
+                                        padding=3)
 
         x_latent1_encodings = self.reshape_feature(
             self.backbone_highres_hook1,
             self.out_size,
             self.out_size,
         )
-        x_latent1_features = self.merge(
-            x_latent1_encodings[: batch_size * 5 * 5], batch_size=batch_size, padding=3
-        )
+        x_latent1_features = self.merge(x_latent1_encodings[:batch_size * 5 *
+                                                            5],
+                                        batch_size=batch_size,
+                                        padding=3)
 
         # Split the 35 batch size from pyramid encoding back into 5x5+3x3+1x1.
         x0_encodings, x1_encodings, x2_encodings = torch.split(
             x_pyramid_encodings,
-            [len(x0_patches), len(x1_patches), len(x2_patches)],
+            [len(x0_patches),
+             len(x1_patches),
+             len(x2_patches)],
             dim=0,
         )
 
         # 96x96 feature maps by merging 5x5 @ 24x24 patches with overlaps.
-        x0_features = self.merge(x0_encodings, batch_size=batch_size, padding=3)
+        x0_features = self.merge(x0_encodings,
+                                 batch_size=batch_size,
+                                 padding=3)
 
         # 48x84 feature maps by merging 3x3 @ 24x24 patches with overlaps.
-        x1_features = self.merge(x1_encodings, batch_size=batch_size, padding=6)
+        x1_features = self.merge(x1_encodings,
+                                 batch_size=batch_size,
+                                 padding=6)
 
         # 24x24 feature maps.
         x2_features = x2_encodings
 
         # Apply the image encoder model.
         x_global_features = self.image_encoder(x2_patches)
-        x_global_features = self.reshape_feature(
-            x_global_features, self.out_size, self.out_size
-        )
+        x_global_features = self.reshape_feature(x_global_features,
+                                                 self.out_size, self.out_size)
 
         # Upsample feature maps.
         x_latent0_features = self.upsample_latent0(x_latent0_features)
@@ -320,13 +368,30 @@ class DepthProEncoder(nn.Module):
 
         x_global_features = self.upsample_lowres(x_global_features)
         x_global_features = self.fuse_lowres(
-            torch.cat((x2_features, x_global_features), dim=1)
-        )
+            torch.cat((x2_features, x_global_features), dim=1))
 
-        return [
+        # Store both projected and reprojected features for student during training
+        if self.student and self.training:
+            # Project features to teacher dimensions
+            x0_projected = self.x0_proj(x0_features)
+            x1_projected = self.x1_proj(x1_features)
+            x_global_projected = self.x_global_proj(x_global_features)
+
+            # Reproject back to student dimensions
+            x0_features = self.x0_reproj(x0_projected)
+            x1_features = self.x1_reproj(x1_projected)
+            x_global_features = self.x_global_reproj(x_global_projected)
+
+            # Return both projected (teacher-dim) and reprojected (student-dim) features
+            return (x_latent0_features, x_latent1_features, x0_features,
+                    x1_features, x_global_features), (x0_projected,
+                                                      x1_projected,
+                                                      x_global_projected)
+
+        # For teacher or inference, return original features
+        return (
             x_latent0_features,
             x_latent1_features,
             x0_features,
             x1_features,
-            x_global_features,
-        ]
+            x_global_features), ()

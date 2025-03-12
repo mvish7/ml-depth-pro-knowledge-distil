@@ -53,9 +53,9 @@ class FOVNetwork(nn.Module):
             fov_head = fov_head0 + fov_head
         self.head = nn.Sequential(*fov_head)
         self.penultimate_output = None
-        self.penaultimate_hook = self.head[-2].register_forward_hook(self.penultimate_forward_hook)
+        self.head[2].register_forward_hook(self._forward_hook)
 
-    def penultimate_forward_hook(self, module, input, output):
+    def _forward_hook(self, module, input, output):
         self.penultimate_output = output
 
     def forward(self, x: torch.Tensor, lowres_feature: torch.Tensor) -> torch.Tensor:
@@ -84,4 +84,5 @@ class FOVNetwork(nn.Module):
             x = x.reshape_as(lowres_feature) + lowres_feature
         else:
             x = lowres_feature
-        return self.head(x), self.penultimate_output
+        x = self.head(x)
+        return x, self.penultimate_output
