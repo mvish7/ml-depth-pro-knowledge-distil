@@ -79,6 +79,7 @@ def create_model_and_transforms(
     config: DepthProConfig = DEFAULT_MONODEPTH_CONFIG_DICT,
     device: torch.device = torch.device("cpu"),
     precision: torch.dtype = torch.float32,
+    is_student: bool = False,
 ) -> Tuple[DepthPro, Compose]:
     """Create a DepthPro model and load weights from `config.checkpoint_uri`.
 
@@ -111,10 +112,12 @@ def create_model_and_transforms(
         image_encoder=image_encoder,
         hook_block_ids=hook_block_ids,
         decoder_features=config.decoder_features,
+        student=is_student,
     )
     decoder = MultiresConvDecoder(
         dims_encoder=[config.decoder_features] + list(encoder.dims_encoder),
         dim_decoder=config.decoder_features,
+        student=is_student,
     )
 
     model = DepthPro(
@@ -123,6 +126,7 @@ def create_model_and_transforms(
         last_dims=(32, 1),
         use_fov_head=config.use_fov_head,
         fov_encoder=fov_encoder,
+        student=is_student,
     ).to(device)
 
     if precision is not None:
@@ -371,3 +375,98 @@ class DepthPro(nn.Module):
             "depth": depth.squeeze(),
             "focallength_px": f_px,
         }
+
+    def get_projection_parameters(self):
+        """Get parameters of all projection and reprojection layers for
+        knowledge distillation.
+
+        Returns:
+            List of parameters from projection layers in encoder, decoder
+            and head
+        """
+        projection_params = []
+
+        # Encoder projection parameters
+        if hasattr(self.encoder, 'x0_proj'):
+            projection_params.extend([{
+                'params':
+                self.encoder.x0_proj.parameters()
+            }, {
+                'params':
+                self.encoder.x0_reproj.parameters()
+            }, {
+                'params':
+                self.encoder.x1_proj.parameters()
+            }, {
+                'params':
+                self.encoder.x1_reproj.parameters()
+            }, {
+                'params':
+                self.encoder.x_global_proj.parameters()
+            }, {
+                'params':
+                self.encoder.x_global_reproj.parameters()
+            }])
+
+        # Decoder projection parameters
+        if hasattr(self.decoder, 'features_proj'):
+            projection_params.extend([{
+                'params':
+                self.decoder.features_proj.parameters()
+            }, {
+                'params':
+                self.decoder.features_reproj.parameters()
+            }, {
+                'params':
+                self.decoder.lowres_proj.parameters()
+            }, {
+                'params':
+                self.decoder.lowres_reproj.parameters()
+            }])
+
+        # Head projection parameters
+        if hasattr(self, 'head_feat_proj'):
+            projection_params.extend([{
+                'params':
+                self.head_feat_proj.parameters()
+            }, {
+                'params':
+                self.head_feat_reproj.parameters()
+            }])
+
+        return projection_params
+
+    def get_non_projection_parameters(self):
+        """Get all parameters except projection and reprojection layers.
+        
+        Returns:
+            List of parameters excluding projection layers
+        """
+        all_params = set(self.parameters())
+
+        # Get all projection parameters
+        proj_params = set()
+
+        # Encoder projection parameters
+        if hasattr(self.encoder, 'x0_proj'):
+            proj_params.update(self.encoder.x0_proj.parameters())
+            proj_params.update(self.encoder.x0_reproj.parameters())
+            proj_params.update(self.encoder.x1_proj.parameters())
+            proj_params.update(self.encoder.x1_reproj.parameters())
+            proj_params.update(self.encoder.x_global_proj.parameters())
+            proj_params.update(self.encoder.x_global_reproj.parameters())
+
+        # Decoder projection parameters
+        if hasattr(self.decoder, 'features_proj'):
+            proj_params.update(self.decoder.features_proj.parameters())
+            proj_params.update(self.decoder.features_reproj.parameters())
+            proj_params.update(self.decoder.lowres_proj.parameters())
+            proj_params.update(self.decoder.lowres_reproj.parameters())
+
+        # Head projection parameters
+        if hasattr(self, 'head_feat_proj'):
+            proj_params.update(self.head_feat_proj.parameters())
+            proj_params.update(self.head_feat_reproj.parameters())
+
+        # Return parameters that are not in projection layers
+        return [{'params': list(all_params - proj_params)}]
