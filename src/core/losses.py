@@ -6,7 +6,8 @@ import torch.nn.functional as F
 import torch.nn as nn
 
 
-def calc_berhu_loss(pred: torch.Tensor, gt: torch.Tensor,
+def calc_berhu_loss(pred: torch.Tensor,
+                    gt: torch.Tensor,
                     mask: torch.Tensor = None) -> torch.Tensor:
     """
     BerHu loss with adaptive threshold based on median depth.
@@ -19,7 +20,7 @@ def calc_berhu_loss(pred: torch.Tensor, gt: torch.Tensor,
     Returns:
         torch.Tensor: BerHu loss.
     """
-    if mask:
+    if mask is not None:
         pred = pred[mask]
         gt = gt[mask]
 
@@ -113,18 +114,29 @@ class DepthSupervision(nn.Module):
             mask: (B, 1, H, W) mask for valid pixels (optional)
             eps: Small value to prevent log instability
         """
+        # Apply mask if provided
+        if mask is not None:
+            valid_pixels = mask > 0
+            if not torch.any(valid_pixels):
+                return torch.tensor(0.0, device=depth_pred.device)
+            depth_gt = depth_gt[valid_pixels]
+            depth_pred = depth_pred[valid_pixels]
 
-        # mask = gt > 0
-        # Apply mask
-        depth_gt = depth_gt * mask
-        depth_pred = depth_pred * mask
+        valid_depths = (depth_pred > eps) & (depth_gt > eps)
 
-        # Log difference
-        log_diff = torch.log(depth_pred + eps) - torch.log(depth_gt + eps)
-        log_diff = log_diff[mask > 0]
+        if not torch.any(valid_depths):
+            return torch.tensor(0.0, device=depth_pred.device)
+
+        # Only compute loss on valid pixels
+        depth_pred = depth_pred[valid_depths]
+        depth_gt = depth_gt[valid_depths]
+
+        # Log difference (now safe since we've filtered to positive values)
+        log_diff = torch.log(depth_pred) - torch.log(depth_gt)
 
         # Scale-Invariant Loss
-        loss = torch.mean(log_diff**2) - (torch.mean(log_diff)**2)
+        loss = torch.mean(log_diff ** 2) - 0.5 * (torch.mean(log_diff) ** 2)
+
 
         return loss
 
@@ -142,33 +154,30 @@ class DepthSupervision(nn.Module):
             torch.Tensor: Computed loss.
         """
         berhu_depth = calc_berhu_loss(pred, gt, mask)
-        si_depth = self.scale_invariant_loss(pred, gt)
+        si_depth = self.scale_invariant_loss(pred, gt, mask)
         # todo: apply scale factors from configs
-        return  berhu_depth + si_depth
+        return berhu_depth + si_depth
 
 
 class FoVSupervision(nn.Module):
 
-    def __init__(self, teacher_channels, student_channels):
+    def __init__(self):
         super().__init__()
-        self.projection = nn.Conv2d(teacher_channels,
-                                    student_channels,
-                                    kernel_size=1,
-                                    bias=False)
+        pass
 
     def forward(self, student_feat, teacher_feat, teacher_focal,
                 student_focal):
         # Project teacher features to student feature dimension
         cos_sim_loss = self.calc_cosine_similarity(student_feat, teacher_feat)
         loss_focal = F.l1_loss(student_focal, teacher_focal)
+        # todo: apply loss scaling from configs
+        return cos_sim_loss + loss_focal
 
-        return loss
-
-    def get_cosine_similarity(self, student_feat: torch.Tensor,
-                              teacher_feat: torch.Tensor) -> torch.Tensor:
-        teacher_proj = self.projection(teacher_feat)
-        cs_loss = calc_cosine_similarity(student_feat, teacher_proj)
-        return cs_loss
+    # def get_cosine_similarity(self, student_feat: torch.Tensor,
+    #                           teacher_feat: torch.Tensor) -> torch.Tensor:
+    #     teacher_proj = self.projection(teacher_feat)
+    #     cs_loss = calc_cosine_similarity(student_feat, teacher_proj)
+    #     return cs_loss
 
 
 class FeatureDistillation(nn.Module):
@@ -176,7 +185,8 @@ class FeatureDistillation(nn.Module):
     def __init__(self, ):
         pass
 
-    def apply_full_combination(self, teacher_feat: torch.Tensor, student_feat: torch.Tensor) -> torch.Tensor:
+    def apply_full_combination(self, teacher_feat: torch.Tensor,
+                               student_feat: torch.Tensor) -> torch.Tensor:
         """
         applies berhu, cosine similarity and gradient loss between teacher and student features.
         Args:
@@ -189,7 +199,8 @@ class FeatureDistillation(nn.Module):
         # todo: apply loss scaling factors from configs
         return berhu_kd + cs_kd + grad_kd
 
-    def apply_grad_loss(self,teacher_feat: torch.Tensor, student_feat: torch.Tensor) -> torch.Tensor:
+    def apply_grad_loss(self, teacher_feat: torch.Tensor,
+                        student_feat: torch.Tensor) -> torch.Tensor:
         """
         applies gradient loss between teacher and student features.
         Args:
@@ -201,20 +212,20 @@ class FeatureDistillation(nn.Module):
         return grad_kd
 
 
-
 # Example Usage:
 if __name__ == "__main__":
     # Create dummy depth maps
     batch_size = 4
     height, width = 64, 64
-    pred = torch.randn(batch_size, height, width)
-    gt = torch.rand(batch_size, height, width) * 10.0  # Simulate depth range
+    pred = torch.rand(batch_size, 3, height, width)
+    gt = torch.rand(batch_size, 3, height, width) * 10.0
+    mask = torch.ones_like(gt, dtype=torch.bool)
 
     # Create loss instance
     loss_fn = DepthSupervision()
 
     # Calculate loss
-    loss = loss_fn(pred, gt)
+    loss = loss_fn(pred, gt, mask)
     print("BerHu Loss:", loss.item())
 
     # Example with zero values in ground truth to test masking.
