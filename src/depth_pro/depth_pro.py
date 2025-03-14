@@ -377,12 +377,10 @@ class DepthPro(nn.Module):
         }
 
     def get_projection_parameters(self):
-        """Get parameters of all projection and reprojection layers for
-        knowledge distillation.
-
+        """Get parameters of all projection and reprojection layers for knowledge distillation.
+        
         Returns:
-            List of parameters from projection layers in encoder, decoder
-            and head
+            List of parameters from projection layers in encoder, decoder, head, and FOV network
         """
         projection_params = []
 
@@ -434,11 +432,21 @@ class DepthPro(nn.Module):
                 self.head_feat_reproj.parameters()
             }])
 
+        # FOV network projection parameters
+        if hasattr(self.fov, 'penultimate_proj'):
+            projection_params.extend([{
+                'params':
+                self.fov.penultimate_proj.parameters()
+            }, {
+                'params':
+                self.fov.penultimate_reproj.parameters()
+            }])
+
         return projection_params
 
     def get_non_projection_parameters(self):
         """Get all parameters except projection and reprojection layers.
-        
+
         Returns:
             List of parameters excluding projection layers
         """
@@ -467,6 +475,11 @@ class DepthPro(nn.Module):
         if hasattr(self, 'head_feat_proj'):
             proj_params.update(self.head_feat_proj.parameters())
             proj_params.update(self.head_feat_reproj.parameters())
+
+        # FOV network projection parameters
+        if hasattr(self.fov, 'penultimate_proj'):
+            proj_params.update(self.fov.penultimate_proj.parameters())
+            proj_params.update(self.fov.penultimate_reproj.parameters())
 
         # Return parameters that are not in projection layers
         return [{'params': list(all_params - proj_params)}]
