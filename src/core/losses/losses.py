@@ -62,11 +62,14 @@ def calc_cosine_similarity(student_feat: torch.Tensor,
     # Normalize features along channel dimension
     student_feat = F.normalize(student_feat, p=2, dim=1)
     teacher_feat = F.normalize(teacher_feat, p=2, dim=1)
-    # Flatten spatial dimensions
-    student_feat = student_feat.view(student_feat.size(0),
-                                     student_feat.size(1), -1)  # (B, C, H*W)
-    teacher_feat = teacher_feat.view(teacher_feat.size(0),
-                                     teacher_feat.size(1), -1)  # (B, C, H*W)
+    # Flatten spatial dimensions -- discarding flattening to preserve the spatial features. i.e. with flattening cosine
+    # similarity focuses of matching features at each spatial location and thus spatial features gets destroyed.
+
+    #student_feat = student_feat.view(student_feat.size(0),
+    #                                 student_feat.size(1), -1)  # (B, C, H*W)
+    #teacher_feat = teacher_feat.view(teacher_feat.size(0),
+    #                                 teacher_feat.size(1), -1)  # (B, C, H*W)
+
     # Compute Cosine Similarity Loss
     cosine_sim = torch.sum(student_feat * teacher_feat, dim=1)  # (B, H*W)
     cosine_sim_loss = 1.0 - cosine_sim.mean()
@@ -165,28 +168,30 @@ class FoVSupervision(nn.Module):
         super().__init__()
         pass
 
-    def forward(self, student_feat, teacher_feat, teacher_focal,
-                student_focal):
-        # Project teacher features to student feature dimension
-        cos_sim_loss = self.calc_cosine_similarity(student_feat, teacher_feat)
+    def forward(self,  teacher_focal, student_focal):
+        # movign cos_sim_loss out as it is a KD loss
+        # cos_sim_loss = calc_cosine_similarity(student_feat, teacher_feat)
         loss_focal = F.l1_loss(student_focal, teacher_focal)
-        # todo: apply loss scaling from configs
-        return cos_sim_loss + loss_focal
-
-    # def get_cosine_similarity(self, student_feat: torch.Tensor,
-    #                           teacher_feat: torch.Tensor) -> torch.Tensor:
-    #     teacher_proj = self.projection(teacher_feat)
-    #     cs_loss = calc_cosine_similarity(student_feat, teacher_proj)
-    #     return cs_loss
+        return loss_focal
 
 
 class FeatureDistillation(nn.Module):
 
     def __init__(self, ):
+        super().__init__()
         pass
 
-    def apply_full_combination(self, teacher_feat: torch.Tensor,
-                               student_feat: torch.Tensor) -> torch.Tensor:
+    def forward(self, student_feat: torch.Tensor, teacher_feat: torch.Tensor,
+                full_combination: bool = True, grad_loss_only: bool = False, cs_loss_only: bool = False) -> torch.Tensor:
+        if full_combination:
+            return self.apply_full_combination(student_feat, teacher_feat)
+        elif grad_loss_only:
+            return self.apply_grad_loss(student_feat, teacher_feat)
+        elif cs_loss_only:
+            return self.apply_cosine_simi_loss(student_feat, teacher_feat)
+
+    def apply_full_combination(self, student_feat: torch.Tensor,
+                               teacher_feat: torch.Tensor) -> torch.Tensor:
         """
         applies berhu, cosine similarity and gradient loss between teacher and student features.
         Args:
@@ -199,8 +204,7 @@ class FeatureDistillation(nn.Module):
         # todo: apply loss scaling factors from configs
         return berhu_kd + cs_kd + grad_kd
 
-    def apply_grad_loss(self, teacher_feat: torch.Tensor,
-                        student_feat: torch.Tensor) -> torch.Tensor:
+    def apply_grad_loss(self, student_feat: torch.Tensor, teacher_feat: torch.Tensor) -> torch.Tensor:
         """
         applies gradient loss between teacher and student features.
         Args:
@@ -210,6 +214,18 @@ class FeatureDistillation(nn.Module):
         grad_kd = calc_spatial_grad_loss(student_feat, teacher_feat)
 
         return grad_kd
+
+    def apply_cosine_simi_loss(self, student_feat: torch.Tensor, teacher_feat: torch.Tensor) -> torch.Tensor:
+        """
+        applies cosine similarity loss between teacher and student features.
+        Args:
+            teacher_feat: activations from designated layer of teacher
+            student_feat: activations from designated layer of student
+        """
+        cs_kd = calc_cosine_similarity(student_feat, teacher_feat)
+
+        return cs_kd
+
 
 
 # Example Usage:
@@ -222,7 +238,12 @@ if __name__ == "__main__":
     mask = torch.ones_like(gt, dtype=torch.bool)
 
     # Create loss instance
-    loss_fn = DepthSupervision()
+    # loss_fn = DepthSupervision()
+    # loss_fn = FoVSupervision()
+    # loss_fn(pred, gt, torch.tensor([25.3]), torch.tensor([38.6]))
+
+    loss_fn = FeatureDistillation()
+    loss_fn(gt, pred)
 
     # Calculate loss
     loss = loss_fn(pred, gt, mask)

@@ -264,7 +264,7 @@ class DepthPro(nn.Module):
 
     def forward(
             self,
-            x: torch.Tensor) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+            x: torch.Tensor):
         """Decode by projection and fusion of multi-resolution encodings.
 
         Args:
@@ -308,14 +308,25 @@ class DepthPro(nn.Module):
                     'x_global': projected_encodings[2],
                     'decoder_features': projected_features[0],
                     'decoder_lowres': projected_features[1],
-                    'head_intermediate': head_intermediate_projected
-                },
+                    'head_intermediate': head_intermediate_projected,
+                    'fov_intermediate': 'op_feat'
+                }
+            }
+        else:
+            return{
+                'depth': canonical_inverse_depth,
+                'fov': fov_deg,
                 'intermediate_features': {
-                    'head': head_intermediate
+                    'x0': encodings[0],
+                    'x1': encodings[1],
+                    'x_global': encodings[2],
+                    'decoder_features': features,
+                    'decoder_lowres': features_0,
+                    'head_intermediate': head_intermediate,
+                    'fov_intermediate': 'op_feat'
                 }
             }
 
-        return canonical_inverse_depth, fov_deg
 
     @torch.no_grad()
     def infer(
