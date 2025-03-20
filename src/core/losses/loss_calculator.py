@@ -2,26 +2,29 @@
 Connects trainer and losses by applying the appropriate loss functions
 to the outputs of the teacher and student models.
 """
-from core.losses.losses import FeatureDistillation
-from src.core.losses.losses import DepthSupervision, FoVSupervision
+from typing import Dict
+
+from src.core.losses.losses import DepthSupervision, FoVSupervision, FeatureDistillation
 import torch
 
 
 class LossCalculator:
+    # todo: make sure loss configs are being used properly -- i.e. active/inactive losses, loss scaling factors
+    def __init__(self, depth_supervisor: DepthSupervision, fov_supervisor: FoVSupervision,
+                 kd_supervisor: FeatureDistillation):
+        self.depth_supervision = depth_supervisor
+        self.fov_supervision = fov_supervisor
+        self.knowledge_distil = kd_supervisor
 
-    def __init__(self):
-        self.depth_supervision = DepthSupervision()
-        self.fov_supervision = FoVSupervision()
-        self.knowledge_distil = FeatureDistillation()
-
-    def calculate_losses(self, student_output: dict,
-                         teacher_output: dict, valid_mask: torch.Tensor = None) -> dict:
+    def calculate_losses(self, student_output: Dict,
+                         teacher_output: Dict, valid_mask: torch.Tensor = None) -> Dict:
         """
         Calculate the losses for depth and field of view (FoV).
 
         Args:
-            student_output (dict): Output from the student model.
-            teacher_output (dict): Output from the teacher model.
+            student_output: Output from the student model.
+            teacher_output: Output from the teacher model.
+            valid_mask:
 
         Returns:
             dict: A dictionary containing the calculated losses.
@@ -37,19 +40,19 @@ class LossCalculator:
         losses['fov_loss'] = fov_loss
 
         # Calculate Knowledge distillation loss
-        kd_encoder_x0 = self.knowledge_distil(student_output["projected_features"]["x0"],
+        losses["kd_encoder_x0"] = self.knowledge_distil(student_output["projected_features"]["x0"],
                                               teacher_output["intermediate_features"]["x0"])
-        kd_encoder_x1 = self.knowledge_distil(student_output["projected_features"]["x0"],
+        losses["kd_encoder_x1"] = self.knowledge_distil(student_output["projected_features"]["x0"],
                                               teacher_output["intermediate_features"]["x0"])
-        kd_encoder_xglobal = self.knowledge_distil(student_output["projected_features"]["x_global"],
+        losses["kd_encoder_xglobal"] = self.knowledge_distil(student_output["projected_features"]["x_global"],
                                               teacher_output["intermediate_features"]["x_global"])
-        kd_decoder_features = self.knowledge_distil(student_output["projected_features"]["decoder_features"],
+        losses["kd_decoder_features"] = self.knowledge_distil(student_output["projected_features"]["decoder_features"],
                                               teacher_output["intermediate_features"]["decoder_features"])
-        kd_decoder_lowres = self.knowledge_distil(student_output["projected_features"]["decoder_lowres"],
+        losses["kd_decoder_lowres"] = self.knowledge_distil(student_output["projected_features"]["decoder_lowres"],
                                               teacher_output["intermediate_features"]["decoder_lowres"], grad_loss_only = True)
-        kd_head = self.knowledge_distil(student_output["projected_features"]["head_intermediate"],
+        losses["kd_head"] = self.knowledge_distil(student_output["projected_features"]["head_intermediate"],
                                               teacher_output["intermediate_features"]["head_intermediate"])
-        kd_fov = self.knowledge_distil(student_output["projected_features"]["head_intermediate"],
+        losses["kd_fov"] = self.knowledge_distil(student_output["projected_features"]["head_intermediate"],
                                               teacher_output["intermediate_features"]["head_intermediate"], cs_loss_only=True)
 
         return losses
