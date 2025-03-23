@@ -3,6 +3,7 @@ import torch
 import torch.optim as optim
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
 
 from src.data.hypersim import HypersimDataset
 from src.depth_pro.depth_pro import create_model_and_transforms
@@ -10,11 +11,13 @@ from src.depth_pro.depth_pro import create_model_and_transforms
 from src.configs import model_configs as model_configs
 from src.configs.training_configs import training_configs
 from src.configs.data_configs import data_configs
+from src.core.losses.loss_calculator import LossCalculator
+from src.core.losses.losses import DepthSupervision, FoVSupervision, FeatureDistillation
 
 
 class DepthEstimationTrainer:
 
-    def __init__(self, model_config: dict, data_config: dict,
+    def __init__(self, model_config, data_config: dict,
                  training_config: dict) -> None:
         """Initialize the depth estimation trainer with model, data, and training configurations.
 
@@ -39,14 +42,21 @@ class DepthEstimationTrainer:
         # behavior can be controlled from configs
         self.teacher, _ = create_model_and_transforms(
             model_config.DEFAULT_MONODEPTH_CONFIG_DICT,
-            training_config["device"], training_config["precision"])
+            training_config["device"], training_config["precision"], is_student=False)
         self.student, _ = create_model_and_transforms(
             model_config.SMALL_MONODEPTH_CONFIG_DICT,
-            training_config["device"], training_config["precision"])
+            training_config["device"], training_config["precision"], is_student=True)
 
         # Initialize optimizer and scheduler
         self.optimizer = self.create_optimizer()
         self.scheduler = self.create_scheduler(self.train_loader.__len__())
+
+        # Initialize the LossCalculator
+        self.loss_calculator = LossCalculator(
+            depth_supervisor=DepthSupervision(self.training_config["loss_config"]),
+            fov_supervisor=FoVSupervision(self.training_config["loss_config"]),
+            kd_supervisor=FeatureDistillation(self.training_config["loss_config"]),
+            config=self.training_config["loss_config"])
 
     def create_dataloaders(self,
                            dataset_cls: type) -> tuple[DataLoader, DataLoader]:
@@ -164,8 +174,39 @@ class DepthEstimationTrainer:
                     self.training_config["resume_from_checkpoint"])
 
         # Set models to appropriate mode
-        self.teacher.eval()  # Teacher model always in eval mode
+        self.teacher.eval()  # Teacher always in eval mode
         self.student.train()
+
+        # Update loss weights based on the current epoch
+        self.update_loss_weights(epoch)
+
+    def update_loss_weights(self, epoch: int) -> None:
+        """Update the scaling factors for KD and direct supervision losses based on the current epoch.
+
+        Args:
+            epoch: Current epoch number
+        """
+        num_epochs = self.training_config["num_epochs"]
+        loss_config = self.training_config["loss_config"]
+
+        # Determine the phase of training
+        if epoch < 0.3 * num_epochs:
+            kd_weight = 0.7
+            direct_weight = 0.3
+        elif epoch < 0.8 * num_epochs:
+            kd_weight = 0.5
+            direct_weight = 0.5
+        else:
+            kd_weight = 0.3
+            direct_weight = 0.7
+
+        # Update the training configuration with new weights
+        self.training_config["loss_config"]["distill_weight"] = kd_weight
+        self.training_config["loss_config"]["gt_weight"] = direct_weight
+
+        print(
+            f"Updated loss weights - KD: {kd_weight}, Direct: {direct_weight}")
+        self.loss_calculator.config = self.training_config["loss_config"]
 
     def train(self, num_epochs: int) -> None:
         """Run the full training loop.
@@ -173,7 +214,7 @@ class DepthEstimationTrainer:
         Args:
             num_epochs: Number of epochs to train for
         """
-        writer = torch.utils.tensorboard.SummaryWriter(
+        writer = SummaryWriter(
             self.training_config.get("tensorboard_dir",
                                      "runs/depth_distillation"))
 
@@ -185,8 +226,7 @@ class DepthEstimationTrainer:
 
         writer.close()
 
-    def train_epoch(self, epoch: int,
-                    writer: torch.utils.tensorboard.SummaryWriter) -> None:
+    def train_epoch(self, epoch: int, writer: SummaryWriter) -> None:
         """Train for one epoch.
 
         Args:
@@ -207,10 +247,10 @@ class DepthEstimationTrainer:
                 step = epoch * len(self.train_loader) + batch_idx
                 writer.add_scalar('train/total_loss',
                                   batch_results['total_loss'], step)
-                writer.add_scalar('train/distill_loss',
-                                  batch_results['distill_loss'], step)
-                writer.add_scalar('train/gt_loss', batch_results['gt_loss'],
-                                  step)
+                for k, v in batch_results.items():
+                    if k != "total_loss":
+                        writer.add_scalar(f'train/{k}',
+                                      batch_results[v], step)
 
         # Compute epoch average losses
         num_batches = len(self.train_loader)
@@ -239,34 +279,17 @@ class DepthEstimationTrainer:
             teacher_pred = self.teacher(images)
         student_pred = self.student(images)
 
-        # Calculate losses
-        # Distillation loss (student learning from teacher)
-        distill_loss = torch.nn.functional.mse_loss(student_pred * valid_mask,
-                                                    teacher_pred * valid_mask)
-
-        # Ground truth loss (student learning from real data)
-        gt_loss = torch.nn.functional.l1_loss(student_pred * valid_mask,
-                                              target_depth * valid_mask)
-
-        # Combined loss
-        total_loss = (
-            self.training_config.get("distill_weight", 0.5) * distill_loss +
-            self.training_config.get("gt_weight", 0.5) * gt_loss)
+        # Calculate losses using LossCalculator
+        losses = self.loss_calculator.calculate_losses(student_pred, teacher_pred, valid_mask=valid_mask)
 
         # Backward pass and optimization
-        total_loss.backward()
+        losses["total_loss"].backward()
         self.optimizer.step()
         self.scheduler.step()
 
-        return {
-            'total_loss': total_loss.item(),
-            'distill_loss': distill_loss.item(),
-            'gt_loss': gt_loss.item(),
-            'predictions': student_pred.detach()
-        }
+        return losses
 
-    def after_epoch(self, epoch: int,
-                    writer: torch.utils.tensorboard.SummaryWriter) -> None:
+    def after_epoch(self, epoch: int, writer: SummaryWriter) -> None:
         """Post-epoch operations including validation and checkpointing.
 
         Args:
@@ -293,8 +316,7 @@ class DepthEstimationTrainer:
                     self.training_config["checkpoint_dir"], "best_model.pth")
                 self.save_checkpoint(best_model_path)
 
-    def validate(self, writer: torch.utils.tensorboard.SummaryWriter,
-                 epoch: int) -> float:
+    def validate(self, writer: SummaryWriter, epoch: int) -> float:
         """Run validation and log metrics.
 
         Args:
