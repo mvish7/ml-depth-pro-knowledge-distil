@@ -1,6 +1,8 @@
 """
     implements losses for knowledge distillation training
 """
+from typing import Dict
+
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
@@ -101,8 +103,9 @@ def calc_spatial_grad_loss(student_feat: torch.Tensor,
 
 class DepthSupervision(nn.Module):
 
-    def __init__(self):
+    def __init__(self, config: Dict):
         super().__init__()
+        self.config = config
 
     @staticmethod
     def scale_invariant_loss(depth_pred: torch.Tensor,
@@ -159,27 +162,28 @@ class DepthSupervision(nn.Module):
         berhu_depth = calc_berhu_loss(pred, gt, mask)
         si_depth = self.scale_invariant_loss(pred, gt, mask)
         # todo: apply scale factors from configs
-        return berhu_depth + si_depth
+        total_depth_loss = self.config["berhu_scaling"] * berhu_depth + self.config["si_scaling"] * si_depth
+        return total_depth_loss
 
 
 class FoVSupervision(nn.Module):
 
-    def __init__(self):
+    def __init__(self, config: Dict):
         super().__init__()
-        pass
+        self.config = config
 
     def forward(self,  teacher_focal, student_focal):
         # movign cos_sim_loss out as it is a KD loss
         # cos_sim_loss = calc_cosine_similarity(student_feat, teacher_feat)
         loss_focal = F.l1_loss(student_focal, teacher_focal)
-        return loss_focal
+        return self.config["fov_l1_scaling"] * loss_focal
 
 
 class FeatureDistillation(nn.Module):
 
-    def __init__(self, ):
+    def __init__(self, config: Dict):
         super().__init__()
-        pass
+        self.config = config
 
     def forward(self, student_feat: torch.Tensor, teacher_feat: torch.Tensor,
                 full_combination: bool = True, grad_loss_only: bool = False, cs_loss_only: bool = False) -> torch.Tensor:
@@ -201,8 +205,8 @@ class FeatureDistillation(nn.Module):
         berhu_kd = calc_berhu_loss(student_feat, teacher_feat, mask=None)
         cs_kd = calc_cosine_similarity(student_feat, teacher_feat)
         grad_kd = calc_spatial_grad_loss(student_feat, teacher_feat)
-        # todo: apply loss scaling factors from configs
-        return berhu_kd + cs_kd + grad_kd
+        return (self.config["berhu_kd_scaling"] * berhu_kd + self.config["cs_kd_scaling"] * cs_kd +
+         self.config["grad_kd_scaling"] * grad_kd)
 
     def apply_grad_loss(self, student_feat: torch.Tensor, teacher_feat: torch.Tensor) -> torch.Tensor:
         """
@@ -213,7 +217,7 @@ class FeatureDistillation(nn.Module):
         """
         grad_kd = calc_spatial_grad_loss(student_feat, teacher_feat)
 
-        return grad_kd
+        return self.config["grad_kd_scaling"] * grad_kd
 
     def apply_cosine_simi_loss(self, student_feat: torch.Tensor, teacher_feat: torch.Tensor) -> torch.Tensor:
         """
@@ -224,7 +228,7 @@ class FeatureDistillation(nn.Module):
         """
         cs_kd = calc_cosine_similarity(student_feat, teacher_feat)
 
-        return cs_kd
+        return self.config["cs_kd_scaling"] * cs_kd
 
 
 
