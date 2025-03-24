@@ -80,7 +80,7 @@ class HypersimDataset(BaseDataset):
             ToTensor(),
             Pad([0, 128, 0, 128], padding_mode="reflect"),
             Resize((1536, 1536)),
-            Lambda(lambda x: x.to(device)),
+            # Lambda(lambda x: x.to(device)),
             Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
             ConvertImageDtype(precision),
         ])
@@ -89,7 +89,7 @@ class HypersimDataset(BaseDataset):
             ToTensor(),
             Pad([0, 128, 0, 128], fill=0),
             Resize((1536, 1536)),
-            Lambda(lambda x: x.to(device)),
+            # Lambda(lambda x: x.to(device)),
             ConvertImageDtype(precision),
         ])
         # useful area of the mask is 0 < mask < 10
@@ -98,7 +98,7 @@ class HypersimDataset(BaseDataset):
             ToTensor(),
             Pad([0, 128, 0, 128], fill=10),
             Resize((1536, 1536)),
-            Lambda(lambda x: x.to(device))
+            # Lambda(lambda x: x.to(device))
         ])
 
         self.apply_augmentation = DepthAugmentation()
@@ -151,7 +151,7 @@ class HypersimDataset(BaseDataset):
         # copy to force contiguous memory -- avoid numpy negative stride error caused by np.fliplr
         image = self.image_transform(np.copy(image))
         depth = self.depth_transform(np.copy(depth))
-        mask = self.maks_transform(mask)
+        mask = self.maks_transform(mask).to(torch.bool)
 
         return {'image': image, 'depth': depth, 'valid_mask': mask}
 

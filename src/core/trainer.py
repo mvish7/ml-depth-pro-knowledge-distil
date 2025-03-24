@@ -270,9 +270,9 @@ class DepthEstimationTrainer:
         self.optimizer.zero_grad()
 
         # Get inputs
-        images = batch['image']
-        target_depth = batch['depth']
-        valid_mask = batch['valid_mask']
+        images = batch['image'].to(self.device)
+        target_depth = batch['depth'].to(self.device)
+        valid_mask = batch['valid_mask'].to(self.device)
 
         # Forward passes
         with torch.no_grad():
@@ -280,7 +280,7 @@ class DepthEstimationTrainer:
         student_pred = self.student(images)
 
         # Calculate losses using LossCalculator
-        losses = self.loss_calculator.calculate_losses(student_pred, teacher_pred, valid_mask=valid_mask)
+        losses = self.loss_calculator.calculate_losses(student_pred, teacher_pred, target_depth, valid_mask=valid_mask)
 
         # Backward pass and optimization
         losses["total_loss"].backward()

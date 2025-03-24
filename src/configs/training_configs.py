@@ -6,8 +6,8 @@ training_configs = \
         "warmup_steps": 0.1,
         "decay_start": 0.71,
         "lr": 1e-5,
-        "device": "cuda",
-        "precision": torch.float16,
+        "device": "cuda:0",
+        "precision": torch.bfloat16,
         "log_interval": 10,    # How often to log batch results
         "save_checkpoint": True,
         "checkpoint_interval": 2,  # Save every N epochs

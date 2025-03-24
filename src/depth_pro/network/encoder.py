@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import math
-from typing import Iterable, Optional
+from typing import Iterable, Optional, Tuple, Any
 
 import torch
 import torch.nn as nn
@@ -271,7 +271,8 @@ class DepthProEncoder(nn.Module):
                                         c).permute(0, 3, 1, 2)
         return embeddings
 
-    def forward(self, x: torch.Tensor) -> list[torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> tuple[tuple[Any, Any, Any, Any, Any], tuple[Any, Any, Any]] | tuple[
+        tuple[Any, Any, Any, Any, Any], tuple]:
         """Encode input at multiple resolutions.
 
         Args:

@@ -22,6 +22,7 @@ class LossCalculator:
     def calculate_losses(self,
                          student_output: Dict,
                          teacher_output: Dict,
+                         gt_depth: torch.Tensor = None,
                          valid_mask: torch.Tensor = None) -> Dict:
         """
         Calculate the losses for depth and field of view (FoV).
@@ -38,7 +39,7 @@ class LossCalculator:
 
         # Calculate depth loss
         depth_loss = self.depth_supervision(student_output['depth'],
-                                            teacher_output['depth'],
+                                            gt_depth,
                                             mask=valid_mask)
         losses['depth_loss'] = depth_loss
 

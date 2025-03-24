@@ -317,9 +317,9 @@ class DepthPro(nn.Module):
                 'depth': canonical_inverse_depth,
                 'fov': fov_deg,
                 'intermediate_features': {
-                    'x0': encodings[0],
-                    'x1': encodings[1],
-                    'x_global': encodings[2],
+                    'x0': encodings[2],
+                    'x1': encodings[3],
+                    'x_global': encodings[4],
                     'decoder_features': features,
                     'decoder_lowres': features_0,
                     'head_intermediate': head_intermediate,
