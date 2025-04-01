@@ -4,6 +4,7 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
+from loguru import logger
 
 from src.data.hypersim import HypersimDataset
 from src.depth_pro.depth_pro import create_model_and_transforms
@@ -42,10 +43,14 @@ class DepthEstimationTrainer:
         # behavior can be controlled from configs
         self.teacher, _ = create_model_and_transforms(
             model_config.DEFAULT_MONODEPTH_CONFIG_DICT,
-            training_config["device"], training_config["precision"], is_student=False)
+            training_config["device"],
+            training_config["precision"],
+            is_student=False)
         self.student, _ = create_model_and_transforms(
             model_config.SMALL_MONODEPTH_CONFIG_DICT,
-            training_config["device"], training_config["precision"], is_student=True)
+            training_config["device"],
+            training_config["precision"],
+            is_student=True)
 
         # Initialize optimizer and scheduler
         self.optimizer = self.create_optimizer()
@@ -53,9 +58,11 @@ class DepthEstimationTrainer:
 
         # Initialize the LossCalculator
         self.loss_calculator = LossCalculator(
-            depth_supervisor=DepthSupervision(self.training_config["loss_config"]),
+            depth_supervisor=DepthSupervision(
+                self.training_config["loss_config"]),
             fov_supervisor=FoVSupervision(self.training_config["loss_config"]),
-            kd_supervisor=FeatureDistillation(self.training_config["loss_config"]),
+            kd_supervisor=FeatureDistillation(
+                self.training_config["loss_config"]),
             config=self.training_config["loss_config"])
 
     def create_dataloaders(self,
@@ -234,9 +241,10 @@ class DepthEstimationTrainer:
             writer: Tensorboard writer instance
         """
         epoch_losses = {'total_loss': 0.0, 'distill_loss': 0.0, 'gt_loss': 0.0}
+        total_iters = len(self.train_loader)
 
         for batch_idx, batch in enumerate(self.train_loader):
-            batch_results = self.train_batch(batch)
+            batch_results = self.train_batch(batch, batch_idx)
 
             # Update running losses
             for k in epoch_losses.keys():
@@ -249,8 +257,16 @@ class DepthEstimationTrainer:
                                   batch_results['total_loss'], step)
                 for k, v in batch_results.items():
                     if k != "total_loss":
-                        writer.add_scalar(f'train/{k}',
-                                      batch_results[v], step)
+                        writer.add_scalar(f'train/{k}', v, step)
+
+                # Add detailed logging every 10 * log_interval iterations
+                if batch_idx % (10 * self.training_config.get(
+                        "log_interval", 10)) == 0:
+                    logger.info(
+                        f"Iteration [{batch_idx}/{total_iters}] "
+                        f"Total Loss: {batch_results['total_loss']:.4f} | "
+                        f"GT Loss: {batch_results['gt_loss']:.4f} | "
+                        f"Distill Loss: {batch_results['distill_loss']:.4f}")
 
         # Compute epoch average losses
         num_batches = len(self.train_loader)
@@ -258,17 +274,16 @@ class DepthEstimationTrainer:
             epoch_losses[k] /= num_batches
             writer.add_scalar(f'train/epoch_{k}', epoch_losses[k], epoch)
 
-    def train_batch(self, batch: dict) -> dict:
-        """Process a single training batch.
+    def train_batch(self, batch: dict, batch_idx: int) -> dict:
+        """Process a single training batch with gradient accumulation.
 
         Args:
             batch: Dictionary containing 'image', 'depth', and 'valid_mask'
+            batch_idx: id of the current batch
 
         Returns:
             Dictionary containing loss values and predictions
         """
-        self.optimizer.zero_grad()
-
         # Get inputs
         images = batch['image'].to(self.device)
         target_depth = batch['depth'].to(self.device)
@@ -276,16 +291,27 @@ class DepthEstimationTrainer:
 
         # Forward passes
         with torch.no_grad():
+            self.teacher = self.teacher.to("cuda")
             teacher_pred = self.teacher(images)
+
+        self.teacher = self.teacher.to("cpu")
         student_pred = self.student(images)
 
         # Calculate losses using LossCalculator
-        losses = self.loss_calculator.calculate_losses(student_pred, teacher_pred, target_depth, valid_mask=valid_mask)
+        losses = self.loss_calculator.calculate_losses(student_pred,
+                                                       teacher_pred,
+                                                       target_depth,
+                                                       valid_mask=valid_mask)
 
-        # Backward pass and optimization
-        losses["total_loss"].backward()
-        self.optimizer.step()
-        self.scheduler.step()
+        # Normalize loss to account for accumulation
+        loss = losses["total_loss"] / self.training_config["accumulation_steps"]
+        loss.backward()
+
+        # Update weights and reset gradients every accumulation_steps
+        if (batch_idx + 1) % self.training_config["accumulation_steps"] == 0:
+            self.optimizer.step()
+            self.scheduler.step()
+            self.optimizer.zero_grad()
 
         return losses
 
