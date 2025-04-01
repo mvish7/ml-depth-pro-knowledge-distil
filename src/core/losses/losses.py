@@ -28,25 +28,8 @@ def calc_berhu_loss(pred: torch.Tensor,
 
     diff = torch.abs(pred - gt)
 
-    # Calculate median depth for adaptive threshold
-    median_depth = torch.median(gt)
-
-    # Adaptive threshold (c)
-    c = 0.2 * median_depth
-
-    # BerHu loss calculation
-    l1_mask = diff <= c
-    l2_mask = diff > c
-
-    l1_loss = diff[l1_mask]
-    # making l2 loss match l1 loss when diff == c, avoids discontinuity
-    l2_loss = (diff[l2_mask]**2 + c**2) / (2 * c)
-
-
-    berhu_loss = torch.cat([l1_loss, l2_loss]).mean() if len(torch.cat([l1_loss, l2_loss])) > 0 \
-                                                else torch.tensor(0.0, device=pred.device)
-
-    return berhu_loss
+    C = 0.2 * torch.max(diff).item()
+    return torch.mean(torch.where(diff < C, diff, (diff * diff + C * C) / (2 * C)))
 
 
 def calc_cosine_similarity(student_feat: torch.Tensor,
