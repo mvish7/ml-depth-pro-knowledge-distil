@@ -8,6 +8,7 @@ training_configs = \
         "lr": 1e-5,
         "device": "cuda:0",
         "precision": torch.bfloat16,
+        "accumulation_steps": 32,
         "log_interval": 10,    # How often to log batch results
         "save_checkpoint": True,
         "checkpoint_interval": 2,  # Save every N epochs
@@ -15,12 +16,12 @@ training_configs = \
         "checkpoint_dir": "checkpoints/",
         "resume_from_checkpoint": None,
         "loss_config": {
-            """
-            idea is to use following schedule for adpting kd and direct supervision loss weights:
-            initial phase (0-30% of total): kd - 0.7, direct - 0.3
-            mid phase (31-80% of total): kd - 0.5, direct - 0.5
-            final phase (81 - 100% of total): kd - 0.3, direct - 0.7
-            """
+
+            # idea is to use following schedule for adpting kd and direct supervision loss weights:
+            # initial phase (0-30% of total): kd - 0.7, direct - 0.3
+            # mid phase (31-80% of total): kd - 0.5, direct - 0.5
+            # final phase (81 - 100% of total): kd - 0.3, direct - 0.7
+
             "kd_weighting": 0.7,  # initial scaling factors, will be adapted in trainer as training progresses
             "gt_weight": 0.3,  # initial scaling factors, will be adapted in trainer as training progresses
             "berhu_scaling": 1.0,
