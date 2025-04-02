@@ -30,7 +30,8 @@ class LossCalculator:
         Args:
             student_output: Output from the student model.
             teacher_output: Output from the teacher model.
-            valid_mask:
+            gt_depth: depth gt to be used for direct supervision
+            valid_mask: mask of pixels to be used for supervision
 
         Returns:
             dict: A dictionary containing the calculated losses.
@@ -90,10 +91,10 @@ class LossCalculator:
         losses["kd_fov"] = fov
 
         # apply overall scaling of kd losses
-        losses["total_kd"] = self.config["kd_weighting"] * (encoder_x0 + encoder_x1 + encoder_xglobal +
+        losses["distill_loss"] = self.config["kd_weighting"] * (encoder_x0 + encoder_x1 + encoder_xglobal +
                                                             decoder_feat + decoder_lowres + head + fov)
         # Calculate total loss as sum of all individual losses
-        total_loss = losses["gt_loss"] + losses["total_kd"]
+        total_loss = losses["gt_loss"] + losses["distill_loss"]
         losses['total_loss'] = total_loss
 
         return losses

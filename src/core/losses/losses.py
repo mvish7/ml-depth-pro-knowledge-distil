@@ -28,7 +28,8 @@ def calc_berhu_loss(pred: torch.Tensor,
 
     diff = torch.abs(pred - gt)
 
-    C = 0.2 * torch.max(diff).item()
+    C = 0.2 * torch.max(diff)
+
     return torch.mean(torch.where(diff < C, diff, (diff * diff + C * C) / (2 * C)))
 
 
