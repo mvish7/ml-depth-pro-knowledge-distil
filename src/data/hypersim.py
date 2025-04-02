@@ -142,6 +142,11 @@ class HypersimDataset(BaseDataset):
         # Load depth map
         depth = self.load_depth(filename[1])
 
+        # in hypersim dataset, gt_depth can have nan values. it results into loss being nan, that's why set nan=0  here
+        # as gt_depth <= 0 is masked from loss calc
+        if np.any(np.isnan(depth)):
+            depth = np.where(np.isnan(depth), 0, depth)
+
         # apply augmentations
         image, depth = self.apply_augmentation(image, depth)
         # create a mask to apply during loss calculations
