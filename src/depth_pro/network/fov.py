@@ -61,32 +61,32 @@ class FOVNetwork(nn.Module):
         else:
             fov_head = fov_head0 + fov_head
         self.head = nn.Sequential(*fov_head)
-        self.penultimate_output = None
-        self.head[2].register_forward_hook(self._forward_hook)
+        # self.penultimate_output = None
+        # self.head[2].register_forward_hook(self._forward_hook)
 
         # 1x1 convolutional layers for projecting student features to match teacher's features
-        if student:
-            # For penultimate_output: 12 -> 32 -> 12
-            self.penultimate_proj = nn.Conv2d(in_channels=12,
-                                              out_channels=32,
-                                              kernel_size=1)
-            self.penultimate_reproj = nn.Conv2d(in_channels=32,
-                                                out_channels=12,
-                                                kernel_size=1)
+        # if student:
+        #     # For penultimate_output: 12 -> 32 -> 12
+        #     self.penultimate_proj = nn.Conv2d(in_channels=12,
+        #                                       out_channels=32,
+        #                                       kernel_size=1)
+        #     self.penultimate_reproj = nn.Conv2d(in_channels=32,
+        #                                         out_channels=12,
+        #                                         kernel_size=1)
 
         self.student = student
 
-    def _forward_hook(self, module, input, output):
-        self.penultimate_output = output
-
-        # Project penultimate features if student during training
-        if self.student and self.training:
-            # Project to teacher dimensions
-            self.penultimate_projected = self.penultimate_proj(output)
-            # Reproject back to student dimensions (will replace original output)
-            output = self.penultimate_reproj(self.penultimate_projected)
-
-        return output
+    # def _forward_hook(self, module, input, output):
+    #     self.penultimate_output = output
+    #
+    #     # Project penultimate features if student during training
+    #     if self.student and self.training:
+    #         # Project to teacher dimensions
+    #         self.penultimate_projected = self.penultimate_proj(output)
+    #         # Reproject back to student dimensions (will replace original output)
+    #         output = self.penultimate_reproj(self.penultimate_projected)
+    #
+    #     return output
 
     def forward(self, x: torch.Tensor,
                 lowres_feature: torch.Tensor) -> torch.Tensor:
@@ -116,4 +116,4 @@ class FOVNetwork(nn.Module):
         else:
             x = lowres_feature
         x = self.head(x)
-        return x, self.penultimate_output
+        return x

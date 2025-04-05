@@ -237,25 +237,25 @@ class DepthPro(nn.Module):
         self.head[4].bias.data.fill_(0)
 
         # Register hook to capture intermediate features
-        self.head[1].register_forward_hook(self._head_fwd_hook)
+        # self.head[1].register_forward_hook(self._head_fwd_hook)
 
         # Set the FOV estimation head.
         if use_fov_head:
             self.fov = FOVNetwork(num_features=dim_decoder,
                                   fov_encoder=fov_encoder)
 
-    def _head_fwd_hook(self, module, input, output):
-        """Hook to capture intermediate features from head."""
-        self.head_intermediate_op = output
-
-        # Project intermediate features if student during training
-        if self.student and self.training:
-            # Project to teacher dimensions
-            self.head_intermediate_projected = self.head_feat_proj(output)
-            # Reproject back to student dimensions (will replace original output)
-            output = self.head_feat_reproj(self.head_intermediate_projected)
-
-        return output
+    # def _head_fwd_hook(self, module, input, output):
+    #     """Hook to capture intermediate features from head."""
+    #     self.head_intermediate_op = output
+    #
+    #     # Project intermediate features if student during training
+    #     if self.student and self.training:
+    #         # Project to teacher dimensions
+    #         self.head_intermediate_projected = self.head_feat_proj(output)
+    #         # Reproject back to student dimensions (will replace original output)
+    #         output = self.head_feat_reproj(self.head_intermediate_projected)
+    #
+    #     return output
 
     @property
     def img_size(self) -> int:
@@ -285,17 +285,17 @@ class DepthPro(nn.Module):
              features_0), projected_features = self.decoder(encodings)
             canonical_inverse_depth = self.head(features)
             head_intermediate = self.head_intermediate_op
-            head_intermediate_projected = self.head_intermediate_projected
+            # head_intermediate_projected = self.head_intermediate_projected
         else:
             encodings, _ = self.encoder(x)
             (features, features_0), _ = self.decoder(encodings)
             canonical_inverse_depth = self.head(features)
             head_intermediate = self.head_intermediate_op
-            head_intermediate_projected = None
+            # head_intermediate_projected = None
 
         fov_deg = None
         if hasattr(self, "fov"):
-            fov_deg, op_feat = self.fov.forward(x, features_0.detach())
+            fov_deg = self.fov.forward(x, features_0.detach())
 
         # Return projected features for knowledge distillation if student during training
         if self.student and self.training:
@@ -308,8 +308,7 @@ class DepthPro(nn.Module):
                     'x_global': projected_encodings[2],
                     'decoder_features': projected_features[0],
                     'decoder_lowres': projected_features[1],
-                    'head_intermediate': head_intermediate_projected,
-                    'fov_intermediate': 'op_feat'
+                    # 'head_intermediate': head_intermediate_projected,
                 }
             }
         else:
@@ -322,8 +321,7 @@ class DepthPro(nn.Module):
                     'x_global': encodings[4],
                     'decoder_features': features,
                     'decoder_lowres': features_0,
-                    'head_intermediate': head_intermediate,
-                    'fov_intermediate': 'op_feat'
+                    # 'head_intermediate': head_intermediate,
                 }
             }
 

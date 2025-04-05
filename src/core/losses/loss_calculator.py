@@ -79,20 +79,24 @@ class LossCalculator:
             grad_loss_only=True)
         losses["kd_decoder_lowres"] = decoder_lowres
 
-        head = self.knowledge_distil(
-            student_output["projected_features"]["head_intermediate"],
-            teacher_output["intermediate_features"]["head_intermediate"])
-        losses["kd_head"] = head
+        # head = self.knowledge_distil(
+        #     student_output["projected_features"]["head_intermediate"],
+        #     teacher_output["intermediate_features"]["head_intermediate"])
+        # losses["kd_head"] = head
 
-        fov = self.knowledge_distil(
-            student_output["projected_features"]["head_intermediate"],
-            teacher_output["intermediate_features"]["head_intermediate"],
-            cs_loss_only=True)
-        losses["kd_fov"] = fov
+        # fov = self.knowledge_distil(
+        #     student_output["projected_features"]["fov_intermediate"],
+        #     teacher_output["intermediate_features"]["fov_intermediate"],
+        #     cs_loss_only=True)
+        # losses["kd_fov"] = fov
 
         # apply overall scaling of kd losses
+        # losses["distill_loss"] = self.config["kd_weighting"] * (encoder_x0 + encoder_x1 + encoder_xglobal +
+        #                                                     decoder_feat + decoder_lowres + head + fov)
+
         losses["distill_loss"] = self.config["kd_weighting"] * (encoder_x0 + encoder_x1 + encoder_xglobal +
-                                                            decoder_feat + decoder_lowres + head + fov)
+                                                                decoder_feat + decoder_lowres)
+
         # Calculate total loss as sum of all individual losses
         total_loss = losses["gt_loss"] + losses["distill_loss"]
         losses['total_loss'] = total_loss

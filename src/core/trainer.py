@@ -16,6 +16,21 @@ from src.core.losses.loss_calculator import LossCalculator
 from src.core.losses.losses import DepthSupervision, FoVSupervision, FeatureDistillation
 
 
+class _OptimizerStepFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, loss, optimizer, step_now):
+        ctx.optimizer = optimizer
+        ctx.step_now = step_now
+        return loss
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        if ctx.step_now:
+            ctx.optimizer.step()
+            ctx.optimizer.zero_grad()
+        return grad_output, None, None  # only loss has gradients
+
+
 class DepthEstimationTrainer:
 
     def __init__(self, model_config, data_config: dict,
@@ -108,6 +123,7 @@ class DepthEstimationTrainer:
         """
         return optim.Adam(self.student.parameters(),
                           lr=self.training_config['lr'])
+
 
     def create_scheduler(self, total_steps: int) -> LambdaLR:
         """Create a learning rate scheduler with warmup and decay phases.
@@ -244,6 +260,8 @@ class DepthEstimationTrainer:
         total_iters = len(self.train_loader)
 
         for batch_idx, batch in enumerate(self.train_loader):
+            # if batch_idx > 1:
+            #     break
             batch_results = self.train_batch(batch, batch_idx)
 
             # Update running losses
@@ -284,6 +302,8 @@ class DepthEstimationTrainer:
         Returns:
             Dictionary containing loss values and predictions
         """
+        self.current_batch_idx = batch_idx
+
         # Get inputs
         images = batch['image'].to(self.device)
         target_depth = batch['depth'].to(self.device)
@@ -291,10 +311,10 @@ class DepthEstimationTrainer:
 
         # Forward passes
         with torch.no_grad():
-            self.teacher = self.teacher.to("cuda")
+            # self.teacher = self.teacher.to("cuda")
             teacher_pred = self.teacher(images)
 
-        self.teacher = self.teacher.to("cpu")
+        # self.teacher = self.teacher.to("cpu")
         student_pred = self.student(images)
 
         # Calculate losses using LossCalculator
@@ -310,9 +330,9 @@ class DepthEstimationTrainer:
         # Update weights and reset gradients every accumulation_steps
         if (batch_idx + 1) % self.training_config["accumulation_steps"] == 0:
             self.optimizer.step()
-            self.scheduler.step()
             self.optimizer.zero_grad()
 
+        self.scheduler.step()
         return losses
 
     def after_epoch(self, epoch: int, writer: SummaryWriter) -> None:
@@ -359,9 +379,9 @@ class DepthEstimationTrainer:
 
         with torch.no_grad():
             for batch in self.val_loader:
-                images = batch['image']
-                target_depth = batch['depth']
-                valid_mask = batch['valid_mask']
+                images = batch['image'].to(self.device)
+                target_depth = batch['depth'].to(self.device)
+                valid_mask = batch['valid_mask'].to(self.device)
 
                 predictions = self.student(images)
 

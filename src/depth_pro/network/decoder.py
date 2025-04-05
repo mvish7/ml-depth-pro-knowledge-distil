@@ -107,6 +107,7 @@ class MultiresConvDecoder(nn.Module):
         # to the highest (0).
         features = self.convs[-1](encodings[-1])
         lowres_features = features
+
         features = self.fusions[-1](features)
         for i in range(num_levels - 2, -1, -1):
             features_i = self.convs[i](encodings[i])
