@@ -8,6 +8,7 @@ from loguru import logger
 
 from src.data.hypersim import HypersimDataset
 from src.depth_pro.depth_pro import create_model_and_transforms
+from src.data.sampler import PartitionedSampler
 
 from src.configs import model_configs as model_configs
 from src.configs.training_configs import training_configs
@@ -17,6 +18,7 @@ from src.core.losses.losses import DepthSupervision, FoVSupervision, FeatureDist
 
 
 class _OptimizerStepFunction(torch.autograd.Function):
+
     @staticmethod
     def forward(ctx, loss, optimizer, step_now):
         ctx.optimizer = optimizer
@@ -100,9 +102,18 @@ class DepthEstimationTrainer:
                                   device=self.training_config["device"],
                                   precision=self.training_config["precision"])
 
+        # Create partitioned sampler for training data
+        num_partitions = self.training_config.get("num_partitions", 4)
+        train_sampler = PartitionedSampler(
+            train_dataset,
+            num_partitions=num_partitions,
+            partition_idx=0,  # Start with first partition
+            shuffle=True,
+            seed=self.training_config.get("seed", None))
+
         train_loader = DataLoader(train_dataset,
                                   batch_size=self.data_config['batch_size'],
-                                  shuffle=True,
+                                  sampler=train_sampler,
                                   num_workers=self.data_config.get(
                                       'num_workers', 4),
                                   pin_memory=True)
@@ -123,7 +134,6 @@ class DepthEstimationTrainer:
         """
         return optim.Adam(self.student.parameters(),
                           lr=self.training_config['lr'])
-
 
     def create_scheduler(self, total_steps: int) -> LambdaLR:
         """Create a learning rate scheduler with warmup and decay phases.
@@ -202,6 +212,16 @@ class DepthEstimationTrainer:
 
         # Update loss weights based on the current epoch
         self.update_loss_weights(epoch)
+
+        # Update sampler partition for this epoch
+        if hasattr(self.train_loader, 'sampler') and isinstance(
+                self.train_loader.sampler, PartitionedSampler):
+            num_partitions = self.training_config.get("num_partitions", 4)
+            partition_idx = epoch % num_partitions
+            self.train_loader.sampler.partition_idx = partition_idx
+            if self.train_loader.sampler.shuffle:
+                self.train_loader.sampler.indices = torch.randperm(
+                    len(self.train_loader.sampler.indices)).tolist()
 
     def update_loss_weights(self, epoch: int) -> None:
         """Update the scaling factors for KD and direct supervision losses based on the current epoch.
