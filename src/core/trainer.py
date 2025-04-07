@@ -44,6 +44,7 @@ class DepthEstimationTrainer:
             data_config: Configuration dictionary for dataset and data loading
             training_config: Configuration dictionary for training parameters
         """
+        self.best_val_metric = None
         self.device = torch.device(
             "cuda" if torch.cuda.is_available() else "cpu")
         self.model_config = model_config
@@ -362,7 +363,7 @@ class DepthEstimationTrainer:
             epoch: Current epoch number
             writer: Tensorboard writer instance
         """
-        val_loss = self.validate(writer, epoch)
+        curr_val_metrics = self.validate(writer, epoch)
 
         # Save checkpoint if specified
         if self.training_config.get("save_checkpoint", False):
@@ -376,8 +377,8 @@ class DepthEstimationTrainer:
         # Save best model if specified
         if self.training_config.get("save_best", False):
             if not hasattr(self,
-                           'best_val_loss') or val_loss < self.best_val_loss:
-                self.best_val_loss = val_loss
+                           'best_val_metric') or curr_val_metrics < self.best_val_metric:
+                self.best_val_metric = curr_val_metrics
                 best_model_path = os.path.join(
                     self.training_config["checkpoint_dir"], "best_model.pth")
                 self.save_checkpoint(best_model_path)
@@ -395,7 +396,6 @@ class DepthEstimationTrainer:
         self.student.eval()
         metrics = HypersimDataset.get_validation_metrics()
         val_metrics = {k: 0.0 for k in metrics.keys()}
-        val_loss = 0.0
 
         with torch.no_grad():
             for batch in self.val_loader:
@@ -405,26 +405,19 @@ class DepthEstimationTrainer:
 
                 predictions = self.student(images)
 
-                # Calculate validation loss
-                loss = torch.nn.functional.l1_loss(predictions * valid_mask,
-                                                   target_depth * valid_mask)
-                val_loss += loss.item()
-
                 # Calculate other metrics
                 for name, metric_fn in metrics.items():
-                    val_metrics[name] += metric_fn(predictions * valid_mask,
+                    val_metrics[name] += metric_fn(predictions["depth"] * valid_mask,
                                                    target_depth *
                                                    valid_mask).item()
 
         # Average metrics
         num_batches = len(self.val_loader)
-        val_loss /= num_batches
         for k in val_metrics.keys():
             val_metrics[k] /= num_batches
             writer.add_scalar(f'val/{k}', val_metrics[k], epoch)
-
-        writer.add_scalar('val/loss', val_loss, epoch)
-        return val_loss
+        
+        return val_metrics["rmse_log"] / num_batches
 
 
 if __name__ == "__main__":
