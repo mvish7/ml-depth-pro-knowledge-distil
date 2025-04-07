@@ -181,10 +181,18 @@ class HypersimDataset(BaseDataset):
         return {
             'rmse':
             lambda pred, target: torch.sqrt(torch.mean((pred - target)**2)),
+            'rmse_log':
+            lambda pred, target: torch.sqrt(torch.mean((torch.log(pred) - torch.log(target)) ** 2)),
             'abs_rel':
             lambda pred, target: torch.mean(torch.abs(pred - target) / target),
             'sq_rel':
-            lambda pred, target: torch.mean(((pred - target)**2) / target)
+            lambda pred, target: torch.mean(((pred - target)**2) / target),
+            'delta1':
+            lambda pred, target: torch.mean((torch.max(pred / target, target / pred) < 1.25).float()),
+            'delta2':
+            lambda pred, target: torch.mean((torch.max(pred / target, target / pred) < 1.25**2).float()),
+            'delta3':
+            lambda pred, target: torch.mean((torch.max(pred / target, target / pred) < 1.25**3).float())
         }
 
 
